@@ -216,13 +216,23 @@ end
 local function updateESP()
     for targetPlayer, espData in pairs(ESPObjects) do
         local char = targetPlayer.Character
+        
+        -- Verifica o status de time do player
+        local myTeam = player.Team and player.Team.Name
+        local targetTeam = targetPlayer.Team and targetPlayer.Team.Name
         local isEnemyPlayer = isEnemy(targetPlayer)
+        local isTeammate = false
+        
+        -- Define se é aliado (mesmo time e ambos têm time)
+        if myTeam and targetTeam and myTeam == targetTeam then
+            isTeammate = true
+        end
         
         -- Verifica se deve mostrar ESP baseado nos toggles
         local shouldShow = false
         if isEnemyPlayer and CONFIG.ESPEnemyLigado then
             shouldShow = true
-        elseif not isEnemyPlayer and CONFIG.ESPTeamLigado then
+        elseif isTeammate and CONFIG.ESPTeamLigado then
             shouldShow = true
         end
         
@@ -255,8 +265,16 @@ local function updateESP()
                         local bottomLeft = Vector2.new(bottomScreen.X - width / 2, bottomScreen.Y)
                         local bottomRight = Vector2.new(bottomScreen.X + width / 2, bottomScreen.Y)
                         
-                        -- Define a cor baseado no time
-                        local espColor = isEnemyPlayer and CONFIG.CorEnemy or CONFIG.CorTeammate
+                        -- Define a cor baseado no time (garante que sempre tenha uma cor válida)
+                        local espColor
+                        if isEnemyPlayer then
+                            espColor = CONFIG.CorEnemy
+                        elseif isTeammate then
+                            espColor = CONFIG.CorTeammate
+                        else
+                            -- Fallback para caso algo dê errado (não deveria chegar aqui)
+                            espColor = Color3.fromRGB(255, 255, 255) -- Branco
+                        end
                         
                         -- ═══════════════ BOX ═══════════════
                         if CONFIG.MostrarBoxes then
@@ -322,30 +340,47 @@ local function updateESP()
                         
                         -- ═══════════════ HEALTH BAR ═══════════════
                         if CONFIG.MostrarHealth then
-                            local healthPercent = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-                            local barHeight = height
-                            local barX = topLeft.X - 7
+                            -- Garante que os valores de vida são válidos
+                            local currentHealth = hum.Health
+                            local maxHealth = hum.MaxHealth
                             
-                            local barTop = Vector2.new(barX, topLeft.Y)
-                            local barBottom = Vector2.new(barX, bottomLeft.Y)
-                            local barCurrent = Vector2.new(barX, topLeft.Y + (barHeight * (1 - healthPercent)))
-                            
-                            -- Outline
-                            espData.HealthBarOutline.From = barTop
-                            espData.HealthBarOutline.To = barBottom
-                            espData.HealthBarOutline.Visible = true
-                            
-                            -- Background
-                            espData.HealthBarBackground.From = barTop
-                            espData.HealthBarBackground.To = barBottom
-                            espData.HealthBarBackground.Visible = true
-                            
-                            -- Health (varia do verde ao vermelho)
-                            local healthColor = Color3.new(1 - healthPercent, healthPercent, 0)
-                            espData.HealthBar.From = barCurrent
-                            espData.HealthBar.To = barBottom
-                            espData.HealthBar.Color = healthColor
-                            espData.HealthBar.Visible = true
+                            -- Proteção contra divisão por zero ou valores inválidos
+                            if maxHealth > 0 and currentHealth >= 0 then
+                                local healthPercent = math.clamp(currentHealth / maxHealth, 0, 1)
+                                local barHeight = height
+                                local barX = topLeft.X - 7
+                                
+                                local barTop = Vector2.new(barX, topLeft.Y)
+                                local barBottom = Vector2.new(barX, bottomLeft.Y)
+                                local barCurrent = Vector2.new(barX, topLeft.Y + (barHeight * (1 - healthPercent)))
+                                
+                                -- Outline
+                                espData.HealthBarOutline.From = barTop
+                                espData.HealthBarOutline.To = barBottom
+                                espData.HealthBarOutline.Visible = true
+                                
+                                -- Background
+                                espData.HealthBarBackground.From = barTop
+                                espData.HealthBarBackground.To = barBottom
+                                espData.HealthBarBackground.Visible = true
+                                
+                                -- Health (varia do verde ao vermelho)
+                                -- Garante que a cor nunca seja preta (0,0,0)
+                                local healthColor = Color3.new(
+                                    math.max(1 - healthPercent, 0.1),  -- Vermelho: mínimo 0.1
+                                    math.max(healthPercent, 0.1),      -- Verde: mínimo 0.1
+                                    0
+                                )
+                                espData.HealthBar.From = barCurrent
+                                espData.HealthBar.To = barBottom
+                                espData.HealthBar.Color = healthColor
+                                espData.HealthBar.Visible = true
+                            else
+                                -- Se valores inválidos, esconde health bar
+                                espData.HealthBarOutline.Visible = false
+                                espData.HealthBarBackground.Visible = false
+                                espData.HealthBar.Visible = false
+                            end
                         else
                             espData.HealthBarOutline.Visible = false
                             espData.HealthBarBackground.Visible = false
