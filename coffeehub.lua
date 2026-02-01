@@ -1,5 +1,12 @@
 -- Rayfield Sirius
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local success_rayfield, Rayfield = pcall(function()
+    return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+end)
+
+if not success_rayfield then
+    warn("Failed to load Rayfield")
+    return
+end
 
 -- Services
 local Players = game:GetService("Players")
@@ -17,12 +24,10 @@ local CONFIG = {
     FOV = 150,
     Smoothness = 0.2,
     HoldKey = Enum.UserInputType.MouseButton2,
-
     EnemyESP = false,
     TeamESP = false,
     HealthBar = true,
     Tracer = true,
-
     CustomWalkSpeed = false,
     WalkSpeed = 16
 }
@@ -34,13 +39,31 @@ local COLORS = {
 }
 
 -- =========================
+-- CACHE VALUES
+-- =========================
+local ViewportCache = {
+    CenterX = 0,
+    CenterY = 0,
+    SizeX = 0,
+    SizeY = 0
+}
+
+local function UpdateViewportCache()
+    ViewportCache.SizeX = Camera.ViewportSize.X
+    ViewportCache.SizeY = Camera.ViewportSize.Y
+    ViewportCache.CenterX = ViewportCache.SizeX / 2
+    ViewportCache.CenterY = ViewportCache.SizeY / 2
+end
+
+UpdateViewportCache()
+
+-- =========================
 -- TEAM SYSTEM (PRISON LIFE FIX)
 -- =========================
 local function isEnemy(p)
     if not p or p == LocalPlayer then return false end
     local myTeam = (LocalPlayer.Team and LocalPlayer.Team.Name) or "Neutral"
     local pTeam = (p.Team and p.Team.Name) or "Neutral"
-
     if myTeam == "Guards" then
         return (pTeam == "Inmates" or pTeam == "Criminals")
     elseif myTeam == "Inmates" or myTeam == "Criminals" then
@@ -94,72 +117,79 @@ local ESP_DATA = {}
 local function createESP(p)
     if p == LocalPlayer then return end
     
-    local objects = {
-        Highlight = Instance.new("Highlight"),
-        Billboard = Instance.new("BillboardGui"),
-        Tracer = Drawing.new("Line")
-    }
-
-    objects.Highlight.Name = "ESP_" .. p.Name
-    objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    objects.Highlight.FillTransparency = 0.5
-    objects.Highlight.OutlineTransparency = 0
-
-    objects.Billboard.Size = UDim2.new(0, 100, 0, 50)
-    objects.Billboard.AlwaysOnTop = true
-    objects.Billboard.StudsOffset = Vector3.new(0, 3, 0)
+    local success, result = pcall(function()
+        local objects = {
+            Highlight = Instance.new("Highlight"),
+            Billboard = Instance.new("BillboardGui"),
+            Tracer = Drawing.new("Line")
+        }
+        
+        objects.Highlight.Name = "ESP_" .. p.Name
+        objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        objects.Highlight.FillTransparency = 0.5
+        objects.Highlight.OutlineTransparency = 0
+        
+        objects.Billboard.Size = UDim2.new(0, 100, 0, 50)
+        objects.Billboard.AlwaysOnTop = true
+        objects.Billboard.StudsOffset = Vector3.new(0, 3, 0)
+        
+        local text = Instance.new("TextLabel", objects.Billboard)
+        text.Size = UDim2.new(1, 0, 1, 0)
+        text.BackgroundTransparency = 1
+        text.TextStrokeTransparency = 0
+        text.Font = Enum.Font.GothamBold
+        text.TextSize = 12
+        objects.Label = text
+        
+        ESP_DATA[p] = objects
+    end)
     
-    local text = Instance.new("TextLabel", objects.Billboard)
-    text.Size = UDim2.new(1, 0, 1, 0)
-    text.BackgroundTransparency = 1
-    text.TextStrokeTransparency = 0
-    text.Font = Enum.Font.GothamBold
-    text.TextSize = 12
-    objects.Label = text
-
-    ESP_DATA[p] = objects
+    if not success then
+        warn("Failed to create ESP for player:", p.Name)
+    end
 end
 
 local function updateESP()
     for p, obj in pairs(ESP_DATA) do
-        local char = p.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-        local enemy = isEnemy(p)
-        local visible = (enemy and CONFIG.EnemyESP) or (not enemy and CONFIG.TeamESP)
-
-        if visible and char and hum and hrp and hum.Health > 0 then
-            local color = enemy and COLORS.Enemy or COLORS.Team
+        pcall(function()
+            local char = p.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local enemy = isEnemy(p)
+            local visible = (enemy and CONFIG.EnemyESP) or (not enemy and CONFIG.TeamESP)
             
-            obj.Highlight.Parent = char
-            obj.Highlight.FillColor = color
-            obj.Highlight.OutlineColor = color
-            obj.Highlight.Enabled = true
-
-            obj.Billboard.Parent = hrp
-            obj.Billboard.Enabled = true
-            obj.Label.TextColor3 = color
-            obj.Label.Text = string.format("%s\n%d HP", p.Name, math.floor(hum.Health))
-
-            if CONFIG.Tracer then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                if onScreen then
-                    obj.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    obj.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-                    obj.Tracer.Color = color
-                    obj.Tracer.Visible = true
+            if visible and char and hum and hrp and hum.Health > 0 then
+                local color = enemy and COLORS.Enemy or COLORS.Team
+                
+                obj.Highlight.Parent = char
+                obj.Highlight.FillColor = color
+                obj.Highlight.OutlineColor = color
+                obj.Highlight.Enabled = true
+                
+                obj.Billboard.Parent = hrp
+                obj.Billboard.Enabled = true
+                obj.Label.TextColor3 = color
+                obj.Label.Text = string.format("%s\n%d HP", p.Name, math.floor(hum.Health))
+                
+                if CONFIG.Tracer then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                    if onScreen then
+                        obj.Tracer.From = Vector2.new(ViewportCache.CenterX, ViewportCache.SizeY)
+                        obj.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+                        obj.Tracer.Color = color
+                        obj.Tracer.Visible = true
+                    else
+                        obj.Tracer.Visible = false
+                    end
                 else
                     obj.Tracer.Visible = false
                 end
             else
+                obj.Highlight.Enabled = false
+                obj.Billboard.Enabled = false
                 obj.Tracer.Visible = false
             end
-        else
-            obj.Highlight.Enabled = false
-            obj.Billboard.Enabled = false
-            obj.Tracer.Visible = false
-        end
+        end)
     end
 end
 
@@ -169,29 +199,32 @@ end
 local function getTarget()
     local target = nil
     local shortestDistance = CONFIG.FOV
-
+    
     for _, p in ipairs(Players:GetPlayers()) do
-        if isEnemy(p) and p.Character then
-            local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            -- Busca a parte baseada na CONFIG atualizada na UI
-            local aimPart = getBodyPart(p.Character, CONFIG.AimbotPart)
-
-            if aimPart and hum and hum.Health > 0 then
-                local pos, onScreen = Camera:WorldToViewportPoint(aimPart.Position)
+        pcall(function()
+            if isEnemy(p) and p.Character then
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                -- Busca a parte baseada na CONFIG atualizada na UI
+                local aimPart = getBodyPart(p.Character, CONFIG.AimbotPart)
                 
-                if onScreen then
-                    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-                    local targetPos = Vector2.new(pos.X, pos.Y)
-                    local distance = (targetPos - mousePos).Magnitude
-
-                    if distance < shortestDistance then
-                        shortestDistance = distance
-                        target = aimPart
+                if aimPart and hum and hum.Health > 0 then
+                    local pos, onScreen = Camera:WorldToViewportPoint(aimPart.Position)
+                    
+                    if onScreen then
+                        local mousePos = Vector2.new(ViewportCache.CenterX, ViewportCache.CenterY)
+                        local targetPos = Vector2.new(pos.X, pos.Y)
+                        local distance = (targetPos - mousePos).Magnitude
+                        
+                        if distance < shortestDistance then
+                            shortestDistance = distance
+                            target = aimPart
+                        end
                     end
                 end
             end
-        end
+        end)
     end
+    
     return target
 end
 
@@ -199,36 +232,49 @@ end
 -- LOOPS
 -- =========================
 RunService.RenderStepped:Connect(function()
-    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    FOVCircle.Radius = CONFIG.FOV
-    FOVCircle.Visible = CONFIG.Aimbot
-
-    if CONFIG.Aimbot and UserInputService:IsMouseButtonPressed(CONFIG.HoldKey) then
-        local t = getTarget()
-        if t then
-            local currentCF = Camera.CFrame
-            local targetCF = CFrame.new(currentCF.Position, t.Position)
-            Camera.CFrame = currentCF:Lerp(targetCF, CONFIG.Smoothness)
+    pcall(function()
+        -- Update viewport cache
+        UpdateViewportCache()
+        
+        FOVCircle.Position = Vector2.new(ViewportCache.CenterX, ViewportCache.CenterY)
+        FOVCircle.Radius = CONFIG.FOV
+        FOVCircle.Visible = CONFIG.Aimbot
+        
+        if CONFIG.Aimbot and UserInputService:IsMouseButtonPressed(CONFIG.HoldKey) then
+            local t = getTarget()
+            if t then
+                local currentCF = Camera.CFrame
+                local targetCF = CFrame.new(currentCF.Position, t.Position)
+                Camera.CFrame = currentCF:Lerp(targetCF, CONFIG.Smoothness)
+            end
         end
-    end
-
-    if CONFIG.CustomWalkSpeed and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-        LocalPlayer.Character.Humanoid.WalkSpeed = CONFIG.WalkSpeed
-    end
-
-    updateESP()
+        
+        if CONFIG.CustomWalkSpeed and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = CONFIG.WalkSpeed
+        end
+        
+        updateESP()
+    end)
 end)
 
 -- Initialize
-for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
-Players.PlayerAdded:Connect(createESP)
-Players.PlayerRemoving:Connect(function(p) 
-    if ESP_DATA[p] then 
-        ESP_DATA[p].Highlight:Destroy()
-        ESP_DATA[p].Billboard:Destroy()
-        ESP_DATA[p].Tracer:Remove()
-        ESP_DATA[p] = nil 
-    end 
+for _, p in ipairs(Players:GetPlayers()) do 
+    createESP(p) 
+end
+
+Players.PlayerAdded:Connect(function(p)
+    createESP(p)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    pcall(function()
+        if ESP_DATA[p] then 
+            ESP_DATA[p].Highlight:Destroy()
+            ESP_DATA[p].Billboard:Destroy()
+            ESP_DATA[p].Tracer:Remove()
+            ESP_DATA[p] = nil 
+        end
+    end)
 end)
 
 -- =========================
@@ -241,23 +287,58 @@ local Window = Rayfield:CreateWindow({
 })
 
 local TabAim = Window:CreateTab("Combat")
-TabAim:CreateToggle({Name = "Enable Aimbot", Callback = function(v) CONFIG.Aimbot = v end})
-TabAim:CreateSlider({Name = "FOV Radius", Range = {50, 500}, Increment = 10, CurrentValue = 150, Callback = function(v) CONFIG.FOV = v end})
-TabAim:CreateSlider({Name = "Smoothness", Range = {0.05, 1}, Increment = 0.05, CurrentValue = 0.2, Callback = function(v) CONFIG.Smoothness = v end})
+
+TabAim:CreateToggle({
+    Name = "Enable Aimbot", 
+    Callback = function(v) 
+        CONFIG.Aimbot = v 
+    end
+})
+
+TabAim:CreateSlider({
+    Name = "FOV Radius", 
+    Range = {50, 500}, 
+    Increment = 10, 
+    CurrentValue = 150, 
+    Callback = function(v) 
+        CONFIG.FOV = v 
+    end
+})
+
+TabAim:CreateSlider({
+    Name = "Smoothness", 
+    Range = {0.05, 1}, 
+    Increment = 0.05, 
+    CurrentValue = 0.2, 
+    Callback = function(v) 
+        CONFIG.Smoothness = v 
+    end
+})
 
 TabAim:CreateDropdown({
     Name = "Target Part", 
     Options = {"Head", "Torso"}, 
     CurrentOption = "Head", 
     Callback = function(v) 
-        -- Corrigido: Agora atualiza a CONFIG que o Aimbot consulta em tempo real
-        CONFIG.AimbotPart = v[1] or v -- Rayfield dropdowns podem retornar tabela ou string dependendo da versão
+        CONFIG.AimbotPart = (type(v) == "table" and v[1]) or v
     end
 })
 
 local TabVis = Window:CreateTab("Visuals")
-TabVis:CreateToggle({Name = "Enemy ESP", Callback = function(v) CONFIG.EnemyESP = v end})
-TabVis:CreateToggle({Name = "Team ESP", Callback = function(v) CONFIG.TeamESP = v end})
+
+TabVis:CreateToggle({
+    Name = "Enemy ESP", 
+    Callback = function(v) 
+        CONFIG.EnemyESP = v 
+    end
+})
+
+TabVis:CreateToggle({
+    Name = "Team ESP", 
+    Callback = function(v) 
+        CONFIG.TeamESP = v 
+    end
+})
 
 TabVis:CreateToggle({
     Name = "Tracers", 
@@ -268,7 +349,26 @@ TabVis:CreateToggle({
 })
 
 local TabMisc = Window:CreateTab("Misc")
-TabMisc:CreateToggle({Name = "Custom WalkSpeed", Callback = function(v) CONFIG.CustomWalkSpeed = v end})
-TabMisc:CreateSlider({Name = "Speed Value", Range = {16, 100}, Increment = 1, CurrentValue = 16, Callback = function(v) CONFIG.WalkSpeed = v end})
 
-Rayfield:Notify({Title = "Pronto", Content = "Script corrigido: Troca entre Head/Torso agora é imediata!", Duration = 3})
+TabMisc:CreateToggle({
+    Name = "Custom WalkSpeed", 
+    Callback = function(v) 
+        CONFIG.CustomWalkSpeed = v 
+    end
+})
+
+TabMisc:CreateSlider({
+    Name = "Speed Value", 
+    Range = {16, 100}, 
+    Increment = 1, 
+    CurrentValue = 16, 
+    Callback = function(v) 
+        CONFIG.WalkSpeed = v 
+    end
+})
+
+Rayfield:Notify({
+    Title = "Pronto", 
+    Content = "Script corrigido: Troca entre Head/Torso agora é imediata!", 
+    Duration = 3
+})
