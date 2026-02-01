@@ -1,611 +1,274 @@
+-- Rayfield Sirius
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Teams = game:GetService("Teams")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
 
-local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
-
--- ═══════════════════════════════════════════════════════
--- ⚙️ CONFIGURAÇÕES GERAIS
--- ═══════════════════════════════════════════════════════
+-- =========================
+-- CONFIGURATION
+-- =========================
 local CONFIG = {
-    -- Aimbot
-    AimbotLigado = false,
-    RaioFOV = 150,
-    Suavidade = 0.2,
-    Tecla = Enum.UserInputType.MouseButton2,
-    CorCirculo = Color3.fromRGB(0, 255, 0),
-    AimbotParte = "Head",        -- "Head" ou "Torso"
-    
-    -- ESP
-    ESPEnemyLigado = false,      -- Toggle separado para inimigos
-    ESPTeamLigado = false,       -- Toggle separado para aliados
-    MostrarBoxes = true,
-    MostrarTracers = true,
-    MostrarHealth = true,
-    CorEnemy = Color3.fromRGB(255, 0, 0),
-    CorTeammate = Color3.fromRGB(0, 255, 0),
-    EspessuraLinha = 2,
-    
-    -- Misc/Configs
-    WalkSpeedLigado = false,
-    WalkSpeedValor = 16,         -- Velocidade padrão do Roblox
+    Aimbot = false,
+    AimbotPart = "Head",
+    FOV = 150,
+    Smoothness = 0.2,
+    HoldKey = Enum.UserInputType.MouseButton2,
+
+    EnemyESP = false,
+    TeamESP = false,
+    HealthBar = true,
+    Tracer = true,
+
+    CustomWalkSpeed = false,
+    WalkSpeed = 16
 }
 
--- ═══════════════════════════════════════════════════════
--- 🎨 VISUAL (Círculo FOV)
--- ═══════════════════════════════════════════════════════
-local function criarFOVCircle()
-    if player.PlayerGui:FindFirstChild("AimbotFOV") then 
-        player.PlayerGui.AimbotFOV:Destroy() 
-    end
-    
-    local gui = Instance.new("ScreenGui", player.PlayerGui)
-    gui.Name = "AimbotFOV"
-    gui.ResetOnSpawn = false
+local COLORS = {
+    Enemy = Color3.fromRGB(255, 0, 0),
+    Team = Color3.fromRGB(0, 255, 0),
+    FOV = Color3.fromRGB(0, 255, 0)
+}
 
-    local frame = Instance.new("Frame", gui)
-    frame.BackgroundTransparency = 1
-    frame.AnchorPoint = Vector2.new(0.5, 0.5)
-    frame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    frame.Size = UDim2.new(0, CONFIG.RaioFOV * 2, 0, CONFIG.RaioFOV * 2)
-    frame.Visible = false
-
-    local corner = Instance.new("UICorner", frame)
-    corner.CornerRadius = UDim.new(1, 0)
-
-    local stroke = Instance.new("UIStroke", frame)
-    stroke.Color = CONFIG.CorCirculo
-    stroke.Thickness = 2
-    stroke.Transparency = 0.3
-    
-    return frame
-end
-
-local fovCircle = criarFOVCircle()
-
--- ═══════════════════════════════════════════════════════
--- 🧠 LÓGICA DE TIMES
--- ═══════════════════════════════════════════════════════
-local function isEnemy(targetPlayer)
-    local myTeam = player.Team and player.Team.Name
-    local targetTeam = targetPlayer.Team and targetPlayer.Team.Name
-
-    if not myTeam or not targetTeam then return false end
+-- =========================
+-- TEAM SYSTEM (PRISON LIFE FIX)
+-- =========================
+local function isEnemy(p)
+    if not p or p == LocalPlayer then return false end
+    local myTeam = (LocalPlayer.Team and LocalPlayer.Team.Name) or "Neutral"
+    local pTeam = (p.Team and p.Team.Name) or "Neutral"
 
     if myTeam == "Guards" then
-        if targetTeam == "Inmates" or targetTeam == "Criminals" then
-            return true
-        end
+        return (pTeam == "Inmates" or pTeam == "Criminals")
     elseif myTeam == "Inmates" or myTeam == "Criminals" then
-        if targetTeam == "Guards" then
-            return true
-        end
+        return (pTeam == "Guards")
     end
-
     return false
 end
 
-local function getClosestTarget()
-    local closest = nil
-    local shortestDist = CONFIG.RaioFOV
-    local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
-
-    for _, v in ipairs(Players:GetPlayers()) do
-        if v ~= player and v.Character then
-            if isEnemy(v) then
-                local hum = v.Character:FindFirstChild("Humanoid")
-                
-                -- Seleciona a parte do corpo baseado na config
-                local targetPart = nil
-                if CONFIG.AimbotParte == "Head" then
-                    targetPart = v.Character:FindFirstChild("Head")
-                else -- Torso
-                    targetPart = v.Character:FindFirstChild("UpperTorso") or v.Character:FindFirstChild("Torso")
-                end
-
-                if hum and hum.Health > 0 and targetPart then
-                    local screenPos, onScreen = camera:WorldToScreenPoint(targetPart.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-                        if dist < shortestDist then
-                            shortestDist = dist
-                            closest = targetPart
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return closest
-end
-
--- ═══════════════════════════════════════════════════════
--- 📦 ESP SYSTEM (CORRIGIDO)
--- ═══════════════════════════════════════════════════════
-local function createDrawing(type, properties)
-    local drawing = Drawing.new(type)
-    for prop, value in pairs(properties) do
-        drawing[prop] = value
-    end
-    return drawing
-end
-
-local ESPObjects = {}
-
-local function createESP(targetPlayer)
-    if ESPObjects[targetPlayer] then return end
+-- =========================
+-- GET BODY PART (R6/R15 COMPATIBLE)
+-- =========================
+local function getBodyPart(character, partName)
+    if not character then return nil end
     
-    local espData = {
-        Player = targetPlayer,
+    if partName == "Head" then
+        return character:FindFirstChild("Head")
+    elseif partName == "Torso" then
+        -- Prioridade R6
+        local torso = character:FindFirstChild("Torso")
+        if torso then return torso end
         
-        -- Box (4 linhas formando um retângulo)
-        BoxOutline = {
-            createDrawing("Line", {Thickness = 3, Color = Color3.new(0, 0, 0), Transparency = 1, Visible = false}),
-            createDrawing("Line", {Thickness = 3, Color = Color3.new(0, 0, 0), Transparency = 1, Visible = false}),
-            createDrawing("Line", {Thickness = 3, Color = Color3.new(0, 0, 0), Transparency = 1, Visible = false}),
-            createDrawing("Line", {Thickness = 3, Color = Color3.new(0, 0, 0), Transparency = 1, Visible = false}),
-        },
-        Box = {
-            createDrawing("Line", {Thickness = CONFIG.EspessuraLinha, Transparency = 1, Visible = false}),
-            createDrawing("Line", {Thickness = CONFIG.EspessuraLinha, Transparency = 1, Visible = false}),
-            createDrawing("Line", {Thickness = CONFIG.EspessuraLinha, Transparency = 1, Visible = false}),
-            createDrawing("Line", {Thickness = CONFIG.EspessuraLinha, Transparency = 1, Visible = false}),
-        },
+        -- Prioridade R15
+        local upperTorso = character:FindFirstChild("UpperTorso")
+        if upperTorso then return upperTorso end
         
-        -- Tracer
-        TracerOutline = createDrawing("Line", {Thickness = 3, Color = Color3.new(0, 0, 0), Transparency = 1, Visible = false}),
-        Tracer = createDrawing("Line", {Thickness = CONFIG.EspessuraLinha, Transparency = 1, Visible = false}),
+        local lowerTorso = character:FindFirstChild("LowerTorso")
+        if lowerTorso then return lowerTorso end
         
-        -- Health Bar
-        HealthBarOutline = createDrawing("Line", {Thickness = 5, Color = Color3.new(0, 0, 0), Transparency = 1, Visible = false}),
-        HealthBarBackground = createDrawing("Line", {Thickness = 3, Color = Color3.new(0.2, 0.2, 0.2), Transparency = 1, Visible = false}),
-        HealthBar = createDrawing("Line", {Thickness = 3, Transparency = 1, Visible = false}),
+        return character:FindFirstChild("HumanoidRootPart")
+    end
+    
+    return character:FindFirstChild("Head") -- Fallback padrão
+end
+
+-- =========================
+-- FOV CIRCLE
+-- =========================
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = false
+FOVCircle.Radius = CONFIG.FOV
+FOVCircle.Color = COLORS.FOV
+FOVCircle.Thickness = 1.5
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.8
+
+-- =========================
+-- ESP MANAGER
+-- =========================
+local ESP_DATA = {}
+
+local function createESP(p)
+    if p == LocalPlayer then return end
+    
+    local objects = {
+        Highlight = Instance.new("Highlight"),
+        Billboard = Instance.new("BillboardGui"),
+        Tracer = Drawing.new("Line")
     }
-    
-    ESPObjects[targetPlayer] = espData
-end
 
-local function removeESP(targetPlayer)
-    local espData = ESPObjects[targetPlayer]
-    if not espData then return end
-    
-    -- Remove Box
-    for _, line in ipairs(espData.BoxOutline) do 
-        line.Visible = false
-        line:Remove() 
-    end
-    for _, line in ipairs(espData.Box) do 
-        line.Visible = false
-        line:Remove() 
-    end
-    
-    -- Remove Tracer
-    espData.TracerOutline.Visible = false
-    espData.TracerOutline:Remove()
-    espData.Tracer.Visible = false
-    espData.Tracer:Remove()
-    
-    -- Remove Health Bar
-    espData.HealthBarOutline.Visible = false
-    espData.HealthBarOutline:Remove()
-    espData.HealthBarBackground.Visible = false
-    espData.HealthBarBackground:Remove()
-    espData.HealthBar.Visible = false
-    espData.HealthBar:Remove()
-    
-    ESPObjects[targetPlayer] = nil
-end
+    objects.Highlight.Name = "ESP_" .. p.Name
+    objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    objects.Highlight.FillTransparency = 0.5
+    objects.Highlight.OutlineTransparency = 0
 
-local function hideESP(espData)
-    -- Esconde todos os elementos do ESP
-    for _, line in ipairs(espData.BoxOutline) do 
-        line.Visible = false 
-    end
-    for _, line in ipairs(espData.Box) do 
-        line.Visible = false 
-    end
-    espData.TracerOutline.Visible = false
-    espData.Tracer.Visible = false
-    espData.HealthBarOutline.Visible = false
-    espData.HealthBarBackground.Visible = false
-    espData.HealthBar.Visible = false
+    objects.Billboard.Size = UDim2.new(0, 100, 0, 50)
+    objects.Billboard.AlwaysOnTop = true
+    objects.Billboard.StudsOffset = Vector3.new(0, 3, 0)
+    
+    local text = Instance.new("TextLabel", objects.Billboard)
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.TextStrokeTransparency = 0
+    text.Font = Enum.Font.GothamBold
+    text.TextSize = 12
+    objects.Label = text
+
+    ESP_DATA[p] = objects
 end
 
 local function updateESP()
-    for targetPlayer, espData in pairs(ESPObjects) do
-        local char = targetPlayer.Character
-        
-        -- Verifica o status de time do player
-        local myTeam = player.Team and player.Team.Name
-        local targetTeam = targetPlayer.Team and targetPlayer.Team.Name
-        local isEnemyPlayer = isEnemy(targetPlayer)
-        local isTeammate = false
-        
-        -- Define se é aliado (mesmo time e ambos têm time)
-        if myTeam and targetTeam and myTeam == targetTeam then
-            isTeammate = true
-        end
-        
-        -- Verifica se deve mostrar ESP baseado nos toggles
-        local shouldShow = false
-        if isEnemyPlayer and CONFIG.ESPEnemyLigado then
-            shouldShow = true
-        elseif isTeammate and CONFIG.ESPTeamLigado then
-            shouldShow = true
-        end
-        
-        -- Se não deve mostrar, esconde tudo
-        if not shouldShow then
-            hideESP(espData)
-        else
-            -- Verifica se o personagem existe e está vivo
-            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
-                local hrp = char.HumanoidRootPart
-                local hum = char.Humanoid
-                
-                -- Se morreu, esconde
-                if hum.Health <= 0 then
-                    hideESP(espData)
+    for p, obj in pairs(ESP_DATA) do
+        local char = p.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+        local enemy = isEnemy(p)
+        local visible = (enemy and CONFIG.EnemyESP) or (not enemy and CONFIG.TeamESP)
+
+        if visible and char and hum and hrp and hum.Health > 0 then
+            local color = enemy and COLORS.Enemy or COLORS.Team
+            
+            obj.Highlight.Parent = char
+            obj.Highlight.FillColor = color
+            obj.Highlight.OutlineColor = color
+            obj.Highlight.Enabled = true
+
+            obj.Billboard.Parent = hrp
+            obj.Billboard.Enabled = true
+            obj.Label.TextColor3 = color
+            obj.Label.Text = string.format("%s\n%d HP", p.Name, math.floor(hum.Health))
+
+            if CONFIG.Tracer then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                if onScreen then
+                    obj.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    obj.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+                    obj.Tracer.Color = color
+                    obj.Tracer.Visible = true
                 else
-                    -- Calcula posições na tela
-                    local headPos = char:FindFirstChild("Head") and char.Head.Position or hrp.Position + Vector3.new(0, 2, 0)
-                    local legPos = hrp.Position - Vector3.new(0, 3, 0)
-                    
-                    local topScreen, topOnScreen = camera:WorldToViewportPoint(headPos + Vector3.new(0, 0.5, 0))
-                    local bottomScreen, bottomOnScreen = camera:WorldToViewportPoint(legPos)
-                    
-                    if topOnScreen and bottomOnScreen then
-                        local height = (Vector2.new(bottomScreen.X, bottomScreen.Y) - Vector2.new(topScreen.X, topScreen.Y)).Magnitude
-                        local width = height / 2
-                        
-                        local topLeft = Vector2.new(topScreen.X - width / 2, topScreen.Y)
-                        local topRight = Vector2.new(topScreen.X + width / 2, topScreen.Y)
-                        local bottomLeft = Vector2.new(bottomScreen.X - width / 2, bottomScreen.Y)
-                        local bottomRight = Vector2.new(bottomScreen.X + width / 2, bottomScreen.Y)
-                        
-                        -- Define a cor baseado no time (garante que sempre tenha uma cor válida)
-                        local espColor
-                        if isEnemyPlayer then
-                            espColor = CONFIG.CorEnemy
-                        elseif isTeammate then
-                            espColor = CONFIG.CorTeammate
-                        else
-                            -- Fallback para caso algo dê errado (não deveria chegar aqui)
-                            espColor = Color3.fromRGB(255, 255, 255) -- Branco
-                        end
-                        
-                        -- ═══════════════ BOX ═══════════════
-                        if CONFIG.MostrarBoxes then
-                            -- Outline (preto)
-                            espData.BoxOutline[1].From = topLeft
-                            espData.BoxOutline[1].To = topRight
-                            espData.BoxOutline[1].Visible = true
-                            
-                            espData.BoxOutline[2].From = topRight
-                            espData.BoxOutline[2].To = bottomRight
-                            espData.BoxOutline[2].Visible = true
-                            
-                            espData.BoxOutline[3].From = bottomRight
-                            espData.BoxOutline[3].To = bottomLeft
-                            espData.BoxOutline[3].Visible = true
-                            
-                            espData.BoxOutline[4].From = bottomLeft
-                            espData.BoxOutline[4].To = topLeft
-                            espData.BoxOutline[4].Visible = true
-                            
-                            -- Box colorido
-                            espData.Box[1].From = topLeft
-                            espData.Box[1].To = topRight
-                            espData.Box[1].Color = espColor
-                            espData.Box[1].Visible = true
-                            
-                            espData.Box[2].From = topRight
-                            espData.Box[2].To = bottomRight
-                            espData.Box[2].Color = espColor
-                            espData.Box[2].Visible = true
-                            
-                            espData.Box[3].From = bottomRight
-                            espData.Box[3].To = bottomLeft
-                            espData.Box[3].Color = espColor
-                            espData.Box[3].Visible = true
-                            
-                            espData.Box[4].From = bottomLeft
-                            espData.Box[4].To = topLeft
-                            espData.Box[4].Color = espColor
-                            espData.Box[4].Visible = true
-                        else
-                            for _, line in ipairs(espData.BoxOutline) do line.Visible = false end
-                            for _, line in ipairs(espData.Box) do line.Visible = false end
-                        end
-                        
-                        -- ═══════════════ TRACER ═══════════════
-                        if CONFIG.MostrarTracers then
-                            local tracerStart = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
-                            local tracerEnd = Vector2.new(bottomScreen.X, bottomScreen.Y)
-                            
-                            espData.TracerOutline.From = tracerStart
-                            espData.TracerOutline.To = tracerEnd
-                            espData.TracerOutline.Visible = true
-                            
-                            espData.Tracer.From = tracerStart
-                            espData.Tracer.To = tracerEnd
-                            espData.Tracer.Color = espColor
-                            espData.Tracer.Visible = true
-                        else
-                            espData.TracerOutline.Visible = false
-                            espData.Tracer.Visible = false
-                        end
-                        
-                        -- ═══════════════ HEALTH BAR ═══════════════
-                        if CONFIG.MostrarHealth then
-                            -- Garante que os valores de vida são válidos
-                            local currentHealth = hum.Health
-                            local maxHealth = hum.MaxHealth
-                            
-                            -- Proteção contra divisão por zero ou valores inválidos
-                            if maxHealth > 0 and currentHealth >= 0 then
-                                local healthPercent = math.clamp(currentHealth / maxHealth, 0, 1)
-                                local barHeight = height
-                                local barX = topLeft.X - 7
-                                
-                                local barTop = Vector2.new(barX, topLeft.Y)
-                                local barBottom = Vector2.new(barX, bottomLeft.Y)
-                                local barCurrent = Vector2.new(barX, topLeft.Y + (barHeight * (1 - healthPercent)))
-                                
-                                -- Outline
-                                espData.HealthBarOutline.From = barTop
-                                espData.HealthBarOutline.To = barBottom
-                                espData.HealthBarOutline.Visible = true
-                                
-                                -- Background
-                                espData.HealthBarBackground.From = barTop
-                                espData.HealthBarBackground.To = barBottom
-                                espData.HealthBarBackground.Visible = true
-                                
-                                -- Health (varia do verde ao vermelho)
-                                -- Garante que a cor nunca seja preta (0,0,0)
-                                local healthColor = Color3.new(
-                                    math.max(1 - healthPercent, 0.1),  -- Vermelho: mínimo 0.1
-                                    math.max(healthPercent, 0.1),      -- Verde: mínimo 0.1
-                                    0
-                                )
-                                espData.HealthBar.From = barCurrent
-                                espData.HealthBar.To = barBottom
-                                espData.HealthBar.Color = healthColor
-                                espData.HealthBar.Visible = true
-                            else
-                                -- Se valores inválidos, esconde health bar
-                                espData.HealthBarOutline.Visible = false
-                                espData.HealthBarBackground.Visible = false
-                                espData.HealthBar.Visible = false
-                            end
-                        else
-                            espData.HealthBarOutline.Visible = false
-                            espData.HealthBarBackground.Visible = false
-                            espData.HealthBar.Visible = false
-                        end
-                    else
-                        -- Player fora da tela
-                        hideESP(espData)
-                    end
+                    obj.Tracer.Visible = false
                 end
             else
-                -- Personagem não existe
-                hideESP(espData)
+                obj.Tracer.Visible = false
             end
+        else
+            obj.Highlight.Enabled = false
+            obj.Billboard.Enabled = false
+            obj.Tracer.Visible = false
         end
     end
 end
 
--- Gerencia criação/remoção de ESP para players
-Players.PlayerAdded:Connect(function(targetPlayer)
-    if targetPlayer ~= player then
-        createESP(targetPlayer)
-    end
-end)
+-- =========================
+-- AIMBOT LOGIC (CORRIGIDA)
+-- =========================
+local function getTarget()
+    local target = nil
+    local shortestDistance = CONFIG.FOV
 
-Players.PlayerRemoving:Connect(function(targetPlayer)
-    removeESP(targetPlayer)
-end)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if isEnemy(p) and p.Character then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            -- Busca a parte baseada na CONFIG atualizada na UI
+            local aimPart = getBodyPart(p.Character, CONFIG.AimbotPart)
 
--- Cria ESP para players já no jogo
-for _, targetPlayer in ipairs(Players:GetPlayers()) do
-    if targetPlayer ~= player then
-        createESP(targetPlayer)
+            if aimPart and hum and hum.Health > 0 then
+                local pos, onScreen = Camera:WorldToViewportPoint(aimPart.Position)
+                
+                if onScreen then
+                    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local targetPos = Vector2.new(pos.X, pos.Y)
+                    local distance = (targetPos - mousePos).Magnitude
+
+                    if distance < shortestDistance then
+                        shortestDistance = distance
+                        target = aimPart
+                    end
+                end
+            end
+        end
     end
+    return target
 end
 
--- ═══════════════════════════════════════════════════════
--- 🔄 LOOP PRINCIPAL
--- ═══════════════════════════════════════════════════════
+-- =========================
+-- LOOPS
+-- =========================
 RunService.RenderStepped:Connect(function()
-    -- Aimbot FOV Circle
-    fovCircle.Visible = CONFIG.AimbotLigado
-    
-    -- Aimbot Logic
-    if CONFIG.AimbotLigado then
-        if UserInputService:IsMouseButtonPressed(CONFIG.Tecla) then
-            local alvo = getClosestTarget()
-            if alvo then
-                local look = CFrame.new(camera.CFrame.Position, alvo.Position)
-                camera.CFrame = camera.CFrame:Lerp(look, CONFIG.Suavidade)
-            end
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Radius = CONFIG.FOV
+    FOVCircle.Visible = CONFIG.Aimbot
+
+    if CONFIG.Aimbot and UserInputService:IsMouseButtonPressed(CONFIG.HoldKey) then
+        local t = getTarget()
+        if t then
+            local currentCF = Camera.CFrame
+            local targetCF = CFrame.new(currentCF.Position, t.Position)
+            Camera.CFrame = currentCF:Lerp(targetCF, CONFIG.Smoothness)
         end
     end
-    
-    -- WalkSpeed
-    if CONFIG.WalkSpeedLigado and player.Character then
-        local humanoid = player.Character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = CONFIG.WalkSpeedValor
-        end
+
+    if CONFIG.CustomWalkSpeed and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = CONFIG.WalkSpeed
     end
-    
-    -- ESP Update
+
     updateESP()
 end)
 
--- ═══════════════════════════════════════════════════════
--- 🖥️ INTERFACE RAYFIELD
--- ═══════════════════════════════════════════════════════
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- Initialize
+for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
+Players.PlayerAdded:Connect(createESP)
+Players.PlayerRemoving:Connect(function(p) 
+    if ESP_DATA[p] then 
+        ESP_DATA[p].Highlight:Destroy()
+        ESP_DATA[p].Billboard:Destroy()
+        ESP_DATA[p].Tracer:Remove()
+        ESP_DATA[p] = nil 
+    end 
+end)
 
+-- =========================
+-- UI INTERFACE
+-- =========================
 local Window = Rayfield:CreateWindow({
-   Name = "Coffee Hub",
-   Icon = 0,
-   LoadingTitle = "Coffee Hub Loading",
-   LoadingSubtitle = "by Coffee Studios",
-   Theme = "Default",
-   ConfigurationSaving = {
-      Enabled = true,
-      FolderName = nil,
-      FileName = "CoffeeHub"
-   },
-   KeySystem = false,
+    Name = "Prison Life Hub", 
+    LoadingTitle = "Carregando...", 
+    ConfigurationSaving = {Enabled = false}
 })
 
--- ═══════════════ TAB AIMBOT ═══════════════
-local TabAimbot = Window:CreateTab("Aimbot", 4483362458) 
+local TabAim = Window:CreateTab("Combat")
+TabAim:CreateToggle({Name = "Enable Aimbot", Callback = function(v) CONFIG.Aimbot = v end})
+TabAim:CreateSlider({Name = "FOV Radius", Range = {50, 500}, Increment = 10, CurrentValue = 150, Callback = function(v) CONFIG.FOV = v end})
+TabAim:CreateSlider({Name = "Smoothness", Range = {0.05, 1}, Increment = 0.05, CurrentValue = 0.2, Callback = function(v) CONFIG.Smoothness = v end})
 
-TabAimbot:CreateToggle({
-   Name = "Aimbot (Team Check)",
-   CurrentValue = false,
-   Flag = "AimbotToggle", 
-   Callback = function(Value)
-       CONFIG.AimbotLigado = Value
-   end,
+TabAim:CreateDropdown({
+    Name = "Target Part", 
+    Options = {"Head", "Torso"}, 
+    CurrentOption = "Head", 
+    Callback = function(v) 
+        -- Corrigido: Agora atualiza a CONFIG que o Aimbot consulta em tempo real
+        CONFIG.AimbotPart = v[1] or v -- Rayfield dropdowns podem retornar tabela ou string dependendo da versão
+    end
 })
 
-TabAimbot:CreateButton({
-   Name = "Aimbot Head",
-   Callback = function()
-       CONFIG.AimbotParte = "Head"
-       Rayfield:Notify({
-          Title = "Aimbot Target",
-          Content = "Alvo alterado para: Cabeça",
-          Duration = 2,
-          Image = 4483362458,
-       })
-   end,
+local TabVis = Window:CreateTab("Visuals")
+TabVis:CreateToggle({Name = "Enemy ESP", Callback = function(v) CONFIG.EnemyESP = v end})
+TabVis:CreateToggle({Name = "Team ESP", Callback = function(v) CONFIG.TeamESP = v end})
+
+TabVis:CreateToggle({
+    Name = "Tracers", 
+    CurrentValue = true, 
+    Callback = function(v) 
+        CONFIG.Tracer = v 
+    end
 })
 
-TabAimbot:CreateButton({
-   Name = "Aimbot Torso",
-   Callback = function()
-       CONFIG.AimbotParte = "Torso"
-       Rayfield:Notify({
-          Title = "Aimbot Target",
-          Content = "Alvo alterado para: Torso",
-          Duration = 2,
-          Image = 4483362458,
-       })
-   end,
-})
+local TabMisc = Window:CreateTab("Misc")
+TabMisc:CreateToggle({Name = "Custom WalkSpeed", Callback = function(v) CONFIG.CustomWalkSpeed = v end})
+TabMisc:CreateSlider({Name = "Speed Value", Range = {16, 100}, Increment = 1, CurrentValue = 16, Callback = function(v) CONFIG.WalkSpeed = v end})
 
-TabAimbot:CreateSlider({
-   Name = "FOV Radius",
-   Range = {50, 500},
-   Increment = 10,
-   CurrentValue = 150,
-   Flag = "FOVSlider",
-   Callback = function(Value)
-       CONFIG.RaioFOV = Value
-       fovCircle.Size = UDim2.new(0, Value * 2, 0, Value * 2)
-   end,
-})
-
-TabAimbot:CreateSlider({
-   Name = "Smoothness",
-   Range = {0.1, 1},
-   Increment = 0.05,
-   CurrentValue = 0.2,
-   Flag = "SmoothnessSlider",
-   Callback = function(Value)
-       CONFIG.Suavidade = Value
-   end,
-})
-
--- ═══════════════ TAB ESP ═══════════════
-local TabESP = Window:CreateTab("ESP", 4483362458)
-
-TabESP:CreateToggle({
-   Name = "ESP Enemy",
-   CurrentValue = false,
-   Flag = "ESPEnemyToggle", 
-   Callback = function(Value)
-       CONFIG.ESPEnemyLigado = Value
-   end,
-})
-
-TabESP:CreateToggle({
-   Name = "ESP Team",
-   CurrentValue = false,
-   Flag = "ESPTeamToggle", 
-   Callback = function(Value)
-       CONFIG.ESPTeamLigado = Value
-   end,
-})
-
-TabESP:CreateToggle({
-   Name = "Show Boxes",
-   CurrentValue = true,
-   Flag = "BoxesToggle",
-   Callback = function(Value)
-       CONFIG.MostrarBoxes = Value
-   end,
-})
-
-TabESP:CreateToggle({
-   Name = "Show Tracers",
-   CurrentValue = true,
-   Flag = "TracersToggle",
-   Callback = function(Value)
-       CONFIG.MostrarTracers = Value
-   end,
-})
-
-TabESP:CreateToggle({
-   Name = "Show Health Bars",
-   CurrentValue = true,
-   Flag = "HealthToggle",
-   Callback = function(Value)
-       CONFIG.MostrarHealth = Value
-   end,
-})
-
-TabESP:CreateLabel("Enemy Color: Red | Teammate: Green")
-
--- ═══════════════ TAB CONFIGS ═══════════════
-local TabConfigs = Window:CreateTab("Configs", 4483362458)
-
-TabConfigs:CreateToggle({
-   Name = "Custom WalkSpeed",
-   CurrentValue = false,
-   Flag = "WalkSpeedToggle",
-   Callback = function(Value)
-       CONFIG.WalkSpeedLigado = Value
-       
-       -- Restaura velocidade padrão quando desligado
-       if not Value and player.Character then
-           local humanoid = player.Character:FindFirstChild("Humanoid")
-           if humanoid then
-               humanoid.WalkSpeed = 16
-           end
-       end
-   end,
-})
-
-TabConfigs:CreateSlider({
-   Name = "WalkSpeed Value",
-   Range = {16, 200},
-   Increment = 1,
-   CurrentValue = 16,
-   Flag = "WalkSpeedSlider",
-   Callback = function(Value)
-       CONFIG.WalkSpeedValor = Value
-   end,
-})
-
-TabConfigs:CreateLabel("Default WalkSpeed: 16")
+Rayfield:Notify({Title = "Pronto", Content = "Script corrigido: Troca entre Head/Torso agora é imediata!", Duration = 3})
