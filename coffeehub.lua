@@ -29,13 +29,23 @@ local CONFIG = {
     HealthBar = true,
     Tracer = true,
     CustomWalkSpeed = false,
-    WalkSpeed = 16
+    WalkSpeed = 16,
+    CustomJumpPower = false,
+    JumpPower = 50
 }
 
 local COLORS = {
     Enemy = Color3.fromRGB(255, 0, 0),
     Team = Color3.fromRGB(0, 255, 0),
     FOV = Color3.fromRGB(0, 255, 0)
+}
+
+-- =========================
+-- DEFAULTS (PARA RESET)
+-- =========================
+local DEFAULTS = {
+    WalkSpeed = 16,
+    JumpPower = 50
 }
 
 -- =========================
@@ -204,7 +214,6 @@ local function getTarget()
         pcall(function()
             if isEnemy(p) and p.Character then
                 local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                -- Busca a parte baseada na CONFIG atualizada na UI
                 local aimPart = getBodyPart(p.Character, CONFIG.AimbotPart)
                 
                 if aimPart and hum and hum.Health > 0 then
@@ -249,8 +258,32 @@ RunService.RenderStepped:Connect(function()
             end
         end
         
-        if CONFIG.CustomWalkSpeed and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-            LocalPlayer.Character.Humanoid.WalkSpeed = CONFIG.WalkSpeed
+        -- WalkSpeed (COM RESET)
+        if LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                if CONFIG.CustomWalkSpeed then
+                    hum.WalkSpeed = CONFIG.WalkSpeed
+                else
+                    hum.WalkSpeed = DEFAULTS.WalkSpeed
+                end
+            end
+        end
+        
+        -- JumpPower (COM RESET - BUG CORRIGIDO)
+        if LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                if CONFIG.CustomJumpPower then
+                    -- Aplica JumpPower customizado
+                    hum.UseJumpPower = true
+                    hum.JumpPower = CONFIG.JumpPower
+                else
+                    -- RESET: Volta para o padrão
+                    hum.UseJumpPower = true
+                    hum.JumpPower = DEFAULTS.JumpPower
+                end
+            end
         end
         
         updateESP()
@@ -348,7 +381,24 @@ TabVis:CreateToggle({
     end
 })
 
-local TabMisc = Window:CreateTab("Misc")
+-- Color Pickers
+TabVis:CreateColorPicker({
+    Name = "Enemy Color",
+    Color = COLORS.Enemy,
+    Callback = function(v)
+        COLORS.Enemy = v
+    end
+})
+
+TabVis:CreateColorPicker({
+    Name = "Team Color",
+    Color = COLORS.Team,
+    Callback = function(v)
+        COLORS.Team = v
+    end
+})
+
+local TabMisc = Window:CreateTab("Movement")
 
 TabMisc:CreateToggle({
     Name = "Custom WalkSpeed", 
@@ -361,14 +411,31 @@ TabMisc:CreateSlider({
     Name = "Speed Value", 
     Range = {16, 100}, 
     Increment = 1, 
-    CurrentValue = 16, 
+    CurrentValue = CONFIG.WalkSpeed, 
     Callback = function(v) 
         CONFIG.WalkSpeed = v 
     end
 })
 
+TabMisc:CreateToggle({
+    Name = "Custom Jump Power", 
+    Callback = function(v) 
+        CONFIG.CustomJumpPower = v 
+    end
+})
+
+TabMisc:CreateSlider({
+    Name = "Jump Force", 
+    Range = {50, 150}, 
+    Increment = 5, 
+    CurrentValue = CONFIG.JumpPower, 
+    Callback = function(v) 
+        CONFIG.JumpPower = v 
+    end
+})
+
 Rayfield:Notify({
     Title = "Pronto", 
-    Content = "Script corrigido: Troca entre Head/Torso agora é imediata!", 
+    Content = "BUG DO RESET CORRIGIDO - Agora volta ao padrão!", 
     Duration = 3
 })
