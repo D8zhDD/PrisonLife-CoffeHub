@@ -1,4 +1,3 @@
--- Rayfield Sirius
 local success_rayfield, Rayfield = pcall(function()
     return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 end)
@@ -8,18 +7,15 @@ if not success_rayfield then
     return
 end
 
--- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
--- =========================
--- CONFIGURATION
--- =========================
 local CONFIG = {
     Aimbot = false,
+    AimbotVisible = true,
     AimbotPart = "Head",
     FOV = 150,
     Smoothness = 0.2,
@@ -31,7 +27,9 @@ local CONFIG = {
     CustomWalkSpeed = false,
     WalkSpeed = 16,
     CustomJumpPower = false,
-    JumpPower = 50
+    JumpPower = 50,
+    Fly = false,
+    FlySpeed = 50
 }
 
 local COLORS = {
@@ -40,23 +38,21 @@ local COLORS = {
     FOV = Color3.fromRGB(0, 255, 0)
 }
 
--- =========================
--- DEFAULTS (PARA RESET)
--- =========================
 local DEFAULTS = {
     WalkSpeed = 16,
     JumpPower = 50
 }
 
--- =========================
--- CACHE VALUES
--- =========================
 local ViewportCache = {
     CenterX = 0,
     CenterY = 0,
     SizeX = 0,
     SizeY = 0
 }
+
+local FlyConnection = nil
+local BodyVelocity = nil
+local BodyGyro = nil
 
 local function UpdateViewportCache()
     ViewportCache.SizeX = Camera.ViewportSize.X
@@ -67,9 +63,6 @@ end
 
 UpdateViewportCache()
 
--- =========================
--- TEAM SYSTEM (PRISON LIFE FIX)
--- =========================
 local function isEnemy(p)
     if not p or p == LocalPlayer then return false end
     local myTeam = (LocalPlayer.Team and LocalPlayer.Team.Name) or "Neutral"
@@ -82,20 +75,15 @@ local function isEnemy(p)
     return false
 end
 
--- =========================
--- GET BODY PART (R6/R15 COMPATIBLE)
--- =========================
 local function getBodyPart(character, partName)
     if not character then return nil end
     
     if partName == "Head" then
         return character:FindFirstChild("Head")
     elseif partName == "Torso" then
-        -- Prioridade R6
         local torso = character:FindFirstChild("Torso")
         if torso then return torso end
         
-        -- Prioridade R15
         local upperTorso = character:FindFirstChild("UpperTorso")
         if upperTorso then return upperTorso end
         
@@ -105,12 +93,9 @@ local function getBodyPart(character, partName)
         return character:FindFirstChild("HumanoidRootPart")
     end
     
-    return character:FindFirstChild("Head") -- Fallback padrão
+    return character:FindFirstChild("Head")
 end
 
--- =========================
--- FOV CIRCLE
--- =========================
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Visible = false
 FOVCircle.Radius = CONFIG.FOV
@@ -119,9 +104,6 @@ FOVCircle.Thickness = 1.5
 FOVCircle.Filled = false
 FOVCircle.Transparency = 0.8
 
--- =========================
--- ESP MANAGER
--- =========================
 local ESP_DATA = {}
 
 local function createESP(p)
@@ -203,9 +185,6 @@ local function updateESP()
     end
 end
 
--- =========================
--- AIMBOT LOGIC (CORRIGIDA)
--- =========================
 local function getTarget()
     local target = nil
     local shortestDistance = CONFIG.FOV
@@ -237,17 +216,97 @@ local function getTarget()
     return target
 end
 
--- =========================
--- LOOPS
--- =========================
+local function StartFly()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    BodyVelocity = Instance.new("BodyVelocity")
+    BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    BodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    BodyVelocity.Parent = humanoidRootPart
+    
+    BodyGyro = Instance.new("BodyGyro")
+    BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    BodyGyro.P = 9e4
+    BodyGyro.Parent = humanoidRootPart
+    
+    FlyConnection = RunService.RenderStepped:Connect(function()
+        if not CONFIG.Fly then
+            StopFly()
+            return
+        end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Flying)
+        end
+        
+        local moveDirection = Vector3.new(0, 0, 0)
+        
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            moveDirection = moveDirection + Camera.CFrame.LookVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            moveDirection = moveDirection - Camera.CFrame.LookVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            moveDirection = moveDirection - Camera.CFrame.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            moveDirection = moveDirection + Camera.CFrame.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            moveDirection = moveDirection + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+            moveDirection = moveDirection - Vector3.new(0, 1, 0)
+        end
+        
+        if moveDirection.Magnitude > 0 then
+            moveDirection = moveDirection.Unit
+        end
+        
+        BodyVelocity.Velocity = moveDirection * CONFIG.FlySpeed
+        BodyGyro.CFrame = Camera.CFrame
+    end)
+end
+
+function StopFly()
+    if FlyConnection then
+        FlyConnection:Disconnect()
+        FlyConnection = nil
+    end
+    
+    if BodyVelocity then
+        BodyVelocity:Destroy()
+        BodyVelocity = nil
+    end
+    
+    if BodyGyro then
+        BodyGyro:Destroy()
+        BodyGyro = nil
+    end
+    
+    local character = LocalPlayer.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+        end
+    end
+end
+
 RunService.RenderStepped:Connect(function()
     pcall(function()
-        -- Update viewport cache
         UpdateViewportCache()
         
         FOVCircle.Position = Vector2.new(ViewportCache.CenterX, ViewportCache.CenterY)
         FOVCircle.Radius = CONFIG.FOV
-        FOVCircle.Visible = CONFIG.Aimbot
+        FOVCircle.Color = COLORS.FOV
+        FOVCircle.Visible = CONFIG.Aimbot and CONFIG.AimbotVisible
         
         if CONFIG.Aimbot and UserInputService:IsMouseButtonPressed(CONFIG.HoldKey) then
             local t = getTarget()
@@ -258,30 +317,16 @@ RunService.RenderStepped:Connect(function()
             end
         end
         
-        -- WalkSpeed (COM RESET)
-        if LocalPlayer.Character then
+        if LocalPlayer.Character and not CONFIG.Fly then
             local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
             if hum then
                 if CONFIG.CustomWalkSpeed then
                     hum.WalkSpeed = CONFIG.WalkSpeed
-                else
-                    hum.WalkSpeed = DEFAULTS.WalkSpeed
                 end
-            end
-        end
-        
-        -- JumpPower (COM RESET - BUG CORRIGIDO)
-        if LocalPlayer.Character then
-            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
-            if hum then
+                
                 if CONFIG.CustomJumpPower then
-                    -- Aplica JumpPower customizado
                     hum.UseJumpPower = true
                     hum.JumpPower = CONFIG.JumpPower
-                else
-                    -- RESET: Volta para o padrão
-                    hum.UseJumpPower = true
-                    hum.JumpPower = DEFAULTS.JumpPower
                 end
             end
         end
@@ -290,7 +335,6 @@ RunService.RenderStepped:Connect(function()
     end)
 end)
 
--- Initialize
 for _, p in ipairs(Players:GetPlayers()) do 
     createESP(p) 
 end
@@ -310,9 +354,15 @@ Players.PlayerRemoving:Connect(function(p)
     end)
 end)
 
--- =========================
--- UI INTERFACE
--- =========================
+LocalPlayer.CharacterAdded:Connect(function()
+    wait(0.5)
+    if CONFIG.Fly then
+        StopFly()
+        wait(0.5)
+        StartFly()
+    end
+end)
+
 local Window = Rayfield:CreateWindow({
     Name = "Prison Life Hub", 
     LoadingTitle = "Carregando...", 
@@ -325,6 +375,14 @@ TabAim:CreateToggle({
     Name = "Enable Aimbot", 
     Callback = function(v) 
         CONFIG.Aimbot = v 
+    end
+})
+
+TabAim:CreateToggle({
+    Name = "Show FOV Circle", 
+    CurrentValue = true,
+    Callback = function(v) 
+        CONFIG.AimbotVisible = v 
     end
 })
 
@@ -357,6 +415,14 @@ TabAim:CreateDropdown({
     end
 })
 
+TabAim:CreateColorPicker({
+    Name = "FOV Color",
+    Color = COLORS.FOV,
+    Callback = function(v)
+        COLORS.FOV = v
+    end
+})
+
 local TabVis = Window:CreateTab("Visuals")
 
 TabVis:CreateToggle({
@@ -381,7 +447,6 @@ TabVis:CreateToggle({
     end
 })
 
--- Color Pickers
 TabVis:CreateColorPicker({
     Name = "Enemy Color",
     Color = COLORS.Enemy,
@@ -398,16 +463,16 @@ TabVis:CreateColorPicker({
     end
 })
 
-local TabMisc = Window:CreateTab("Movement")
+local TabMov = Window:CreateTab("Movement")
 
-TabMisc:CreateToggle({
+TabMov:CreateToggle({
     Name = "Custom WalkSpeed", 
     Callback = function(v) 
         CONFIG.CustomWalkSpeed = v 
     end
 })
 
-TabMisc:CreateSlider({
+TabMov:CreateSlider({
     Name = "Speed Value", 
     Range = {16, 100}, 
     Increment = 1, 
@@ -417,14 +482,14 @@ TabMisc:CreateSlider({
     end
 })
 
-TabMisc:CreateToggle({
+TabMov:CreateToggle({
     Name = "Custom Jump Power", 
     Callback = function(v) 
         CONFIG.CustomJumpPower = v 
     end
 })
 
-TabMisc:CreateSlider({
+TabMov:CreateSlider({
     Name = "Jump Force", 
     Range = {50, 150}, 
     Increment = 5, 
@@ -434,8 +499,31 @@ TabMisc:CreateSlider({
     end
 })
 
+TabMov:CreateToggle({
+    Name = "Fly",
+    CurrentValue = false,
+    Callback = function(v)
+        CONFIG.Fly = v
+        if v then
+            StartFly()
+        else
+            StopFly()
+        end
+    end
+})
+
+TabMov:CreateSlider({
+    Name = "Fly Speed",
+    Range = {10, 200},
+    Increment = 5,
+    CurrentValue = 50,
+    Callback = function(v)
+        CONFIG.FlySpeed = v
+    end
+})
+
 Rayfield:Notify({
-    Title = "Pronto", 
-    Content = "BUG DO RESET CORRIGIDO - Agora volta ao padrão!", 
+    Title = "Pronto!", 
+    Content = "Sprint nativo funcionando - Left Shift para correr", 
     Duration = 3
 })
